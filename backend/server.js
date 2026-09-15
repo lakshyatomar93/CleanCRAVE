@@ -91,7 +91,7 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.json({
-    message: "FoodFit API is running",
+    message: "CleanCrave API is running",
   });
 });
 
@@ -183,8 +183,8 @@ app.use(
 const PORT =
   process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(
-    `Server running on http://localhost:${PORT}`
+    `CleanCrave API running on port ${PORT}`
   );
 });
