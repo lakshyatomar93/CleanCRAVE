@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
 const User = require("../models/User");
 const admin = require("../config/firebaseAdmin");
@@ -23,17 +23,10 @@ const generateToken = (user) => {
 };
 
 // ============================================================
-// EMAIL TRANSPORTER
+// RESEND EMAIL SERVICE
 // ============================================================
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ============================================================
 // GENERATE OTP
@@ -52,72 +45,96 @@ const sendEmailOtp = async (
   otp,
   subject = "CleanCRAVE Email Verification"
 ) => {
-  await transporter.sendMail({
-    from: `"CleanCRAVE" <${process.env.EMAIL_USER}>`,
-    to: email,
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      throw new Error("RESEND_API_KEY is not configured.");
+    }
 
-    subject,
+    if (!process.env.EMAIL_FROM) {
+      throw new Error("EMAIL_FROM is not configured.");
+    }
 
-    html: `
-      <div style="
-        font-family: Arial, sans-serif;
-        max-width: 600px;
-        margin: auto;
-        padding: 30px;
-        background: #f7f8f5;
-      ">
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: [email],
+      subject,
 
+      html: `
         <div style="
-          background: white;
-          border-radius: 20px;
+          font-family: Arial, sans-serif;
+          max-width: 600px;
+          margin: auto;
           padding: 30px;
-          text-align: center;
+          background: #f7f8f5;
         ">
 
-          <h1 style="
-            color: #16a34a;
-            margin-bottom: 10px;
-          ">
-            CleanCRAVE
-          </h1>
-
-          <p style="
-            color: #555;
-            font-size: 16px;
-          ">
-            Your verification code is:
-          </p>
-
           <div style="
-            font-size: 36px;
-            font-weight: bold;
-            letter-spacing: 8px;
-            color: #111;
-            margin: 25px 0;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
           ">
-            ${otp}
+
+            <h1 style="
+              color: #16a34a;
+              margin-bottom: 10px;
+            ">
+              CleanCRAVE
+            </h1>
+
+            <p style="
+              color: #555;
+              font-size: 16px;
+            ">
+              Your verification code is:
+            </p>
+
+            <div style="
+              font-size: 36px;
+              font-weight: bold;
+              letter-spacing: 8px;
+              color: #111;
+              margin: 25px 0;
+            ">
+              ${otp}
+            </div>
+
+            <p style="
+              color: #777;
+              font-size: 14px;
+            ">
+              This OTP will expire in 10 minutes.
+            </p>
+
+            <p style="
+              color: #999;
+              font-size: 12px;
+              margin-top: 25px;
+            ">
+              If you did not request this code, you can safely ignore this email.
+            </p>
+
           </div>
 
-          <p style="
-            color: #777;
-            font-size: 14px;
-          ">
-            This OTP will expire in 10 minutes.
-          </p>
-
-          <p style="
-            color: #999;
-            font-size: 12px;
-            margin-top: 25px;
-          ">
-            If you did not request this code, you can safely ignore this email.
-          </p>
-
         </div>
+      `,
+    });
 
-      </div>
-    `,
-  });
+    if (error) {
+      console.error("RESEND EMAIL ERROR:", error);
+      throw new Error(error.message || "Failed to send email.");
+    }
+
+    console.log(
+      "CLEANCRAVE EMAIL SENT:",
+      data?.id || "success"
+    );
+
+    return data;
+  } catch (error) {
+    console.error("EMAIL OTP ERROR:", error);
+    throw error;
+  }
 };
 
 // ============================================================
@@ -984,7 +1001,6 @@ const resendAdminLoginOtp = async (
     });
   }
 };
-
 // ============================================================
 // FIREBASE AUTH
 //
@@ -1608,9 +1624,7 @@ const resetPassword = async (
         "Unable to reset password.",
     });
   }
-};
-
-// ============================================================
+};// ============================================================
 // UPDATE PROFILE
 //
 // Phone is intentionally not included.
