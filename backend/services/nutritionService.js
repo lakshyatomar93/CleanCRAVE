@@ -2,479 +2,298 @@
 // NUTRITION SERVICE
 // ============================================================
 //
-// Extracts nutrition values from USDA FoodData Central.
+// Safely extracts USDA FoodData Central nutrients.
+//
+// FoodData Central nutrient `amount` values are normally expressed
+// on a 100 g basis for the relevant food record. We only accept
+// the amount belonging to the matched nutrient.
 //
 // IMPORTANT:
-// USDA can return different structures depending on the
-// food/data type. We therefore:
-//   1. Identify the nutrient using nutrient number/id/name
-//   2. Read ONLY the amount belonging to that nutrient
-//   3. Never reuse one nutrient's value for another nutrient
-//
-// Values are generally per 100g when USDA provides them that way.
+// - Missing nutrient values are NOT converted into another nutrient.
+// - We do not use broad/ambiguous nutrient matches when an exact
+//   USDA nutrient number is available.
+// - A zero value is allowed when the food genuinely contains zero,
+//   but missing values remain 0 only at the application layer.
 // ============================================================
 
-
-// ============================================================
-// NORMALIZE TEXT
-// ============================================================
-
-const normalizeText = (text = "") => {
-  return String(text)
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-
-// ============================================================
-// GET NUTRIENT NUMBER
-// ============================================================
+const normalizeText = (text = "") =>
+    String(text)
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
 
 const getNutrientNumber = (nutrient) => {
+    if (!nutrient) return "";
 
-  if (!nutrient) {
-    return "";
-  }
+    const values = [
+        nutrient.nutrient?.number,
+        nutrient.nutrientNumber,
+        nutrient.number,
+        nutrient.nutrient?.id,
+        nutrient.nutrientId,
+        nutrient.id,
+    ];
 
-  // USDA search/detail response can use different structures.
-  const possibleNumbers = [
-
-    nutrient.nutrient?.number,
-
-    nutrient.nutrientNumber,
-
-    nutrient.number,
-
-    nutrient.nutrient?.id,
-
-    nutrient.nutrientId,
-
-    nutrient.id,
-
-  ];
-
-  for (const number of possibleNumbers) {
-
-    if (
-      number !== undefined &&
-      number !== null &&
-      number !== ""
-    ) {
-      return String(number);
+    for (const value of values) {
+        if (value !== undefined && value !== null && value !== "") {
+            return String(value);
+        }
     }
 
-  }
-
-  return "";
+    return "";
 };
-
-
-// ============================================================
-// GET NUTRIENT NAME
-// ============================================================
 
 const getNutrientName = (nutrient) => {
+    if (!nutrient) return "";
 
-  if (!nutrient) {
-    return "";
-  }
-
-  return normalizeText(
-
-    nutrient.nutrient?.name ||
-
-    nutrient.name ||
-
-    ""
-
-  );
-
+    return normalizeText(
+        nutrient.nutrient?.name ||
+        nutrient.name ||
+        ""
+    );
 };
-
-
-// ============================================================
-// GET NUTRIENT UNIT
-// ============================================================
 
 const getNutrientUnit = (nutrient) => {
+    if (!nutrient) return "";
 
-  if (!nutrient) {
-    return "";
-  }
-
-  return normalizeText(
-
-    nutrient.nutrient?.unitName ||
-
-    nutrient.unitName ||
-
-    ""
-
-  );
-
+    return normalizeText(
+        nutrient.nutrient?.unitName ||
+        nutrient.unitName ||
+        ""
+    );
 };
 
-
-// ============================================================
-// GET NUTRIENT AMOUNT
-// ============================================================
-//
-// IMPORTANT:
-// We prioritize the direct `amount` field.
-//
-// We DO NOT blindly accept nested `value` fields because
-// some USDA response structures can contain values that are
-// not the actual nutrient amount we want.
-// ============================================================
-
+// USDA detail/search nutrient records normally expose the actual
+// nutrient amount through `amount`. Only fall back to `value` when
+// the direct amount field does not exist.
 const getNutrientAmount = (nutrient) => {
-  if (!nutrient) {
-    return 0;
-  }
+    if (!nutrient) return 0;
 
-  const possibleAmounts = [
-    nutrient.amount,
-    nutrient.value,
-    nutrient.nutrient?.amount,
-    nutrient.nutrient?.value,
-  ];
+    const directAmount = nutrient.amount;
 
-  for (const amount of possibleAmounts) {
     if (
-      amount !== undefined &&
-      amount !== null &&
-      amount !== "" &&
-      Number.isFinite(Number(amount))
+        directAmount !== undefined &&
+        directAmount !== null &&
+        directAmount !== "" &&
+        Number.isFinite(Number(directAmount))
     ) {
-      return Number(amount);
+        return Number(directAmount);
     }
-  }
 
-  return 0;
+    // Some response variants expose the value inside a nested
+    // nutrient object.
+    const fallbackAmounts = [
+        nutrient.nutrient?.amount,
+        nutrient.value,
+        nutrient.nutrient?.value,
+    ];
+
+    for (const amount of fallbackAmounts) {
+        if (
+            amount !== undefined &&
+            amount !== null &&
+            amount !== "" &&
+            Number.isFinite(Number(amount))
+        ) {
+            return Number(amount);
+        }
+    }
+
+    return 0;
 };
-
-
-// ============================================================
-// FIND NUTRIENT
-// ============================================================
 
 const findNutrient = (
-  nutrients,
-  nutrientNumbers = [],
-  nutrientNames = []
+    nutrients,
+    nutrientNumbers = [],
+    nutrientNames = []
 ) => {
-
-  if (
-    !Array.isArray(nutrients) ||
-    nutrients.length === 0
-  ) {
-
-    return null;
-
-  }
-
-
-  const numbers = nutrientNumbers.map(
-    (number) =>
-      String(number)
-  );
-
-
-  const names = nutrientNames.map(
-    (name) =>
-      normalizeText(name)
-  );
-
-
-  // ==========================================================
-  // 1. EXACT USDA NUTRIENT NUMBER
-  // ==========================================================
-
-  const byNumber = nutrients.find(
-    (nutrient) => {
-
-      const number =
-        getNutrientNumber(
-          nutrient
-        );
-
-      return (
-        number &&
-        numbers.includes(number)
-      );
-
+    if (!Array.isArray(nutrients) || nutrients.length === 0) {
+        return null;
     }
-  );
 
+    const numbers = nutrientNumbers.map(String);
+    const names = nutrientNames.map(normalizeText);
 
-  if (byNumber) {
-    return byNumber;
-  }
-
-
-  // ==========================================================
-  // 2. EXACT NUTRIENT NAME
-  // ==========================================================
-
-  const byExactName = nutrients.find(
-    (nutrient) => {
-
-      const name =
-        getNutrientName(
-          nutrient
-        );
-
-      return (
-        name &&
-        names.includes(name)
-      );
-
-    }
-  );
-
-
-  if (byExactName) {
-    return byExactName;
-  }
-
-
-  // ==========================================================
-  // 3. PARTIAL NAME MATCH
-  // ==========================================================
-
-  const byPartialName = nutrients.find(
-    (nutrient) => {
-
-      const name =
-        getNutrientName(
-          nutrient
-        );
-
-
-      if (!name) {
-        return false;
-      }
-
-
-      return names.some(
-        (targetName) => {
-
-          return (
-            name.includes(targetName) ||
-            targetName.includes(name)
-          );
-
-        }
-      );
-
-    }
-  );
-
-
-  return byPartialName || null;
-};
-
-
-// ============================================================
-// GET NUTRIENT VALUE
-// ============================================================
-
-const getNutrientValue = (
-  nutrients,
-  nutrientNumbers,
-  nutrientNames
-) => {
-
-  const nutrient =
-    findNutrient(
-      nutrients,
-      nutrientNumbers,
-      nutrientNames
+    // 1. Exact USDA nutrient number.
+    const byNumber = nutrients.find((nutrient) =>
+        numbers.includes(getNutrientNumber(nutrient))
     );
 
+    if (byNumber) return byNumber;
 
-  if (!nutrient) {
-    return 0;
-  }
+    // 2. Exact nutrient name.
+    const byExactName = nutrients.find((nutrient) => {
+        const name = getNutrientName(nutrient);
+        return name && names.includes(name);
+    });
 
+    if (byExactName) return byExactName;
 
-  return getNutrientAmount(
-    nutrient
-  );
+    // 3. Conservative partial name fallback.
+    const byPartialName = nutrients.find((nutrient) => {
+        const name = getNutrientName(nutrient);
+
+        if (!name) return false;
+
+        return names.some(
+            (targetName) =>
+                name.includes(targetName) ||
+                targetName.includes(name)
+        );
+    });
+
+    return byPartialName || null;
 };
 
+const getNutrientValue = (
+    nutrients,
+    nutrientNumbers,
+    nutrientNames
+) => {
+    const nutrient = findNutrient(
+        nutrients,
+        nutrientNumbers,
+        nutrientNames
+    );
 
-// ============================================================
-// EXTRACT NUTRITION
-// ============================================================
+    if (!nutrient) return 0;
+
+    return getNutrientAmount(nutrient);
+};
 
 const extractNutrition = (food) => {
+    const nutrients = Array.isArray(food?.foodNutrients)
+        ? food.foodNutrients
+        : [];
 
-  const nutrients =
-    Array.isArray(
-      food?.foodNutrients
-    )
-      ? food.foodNutrients
-      : [];
+    const calories = getNutrientValue(
+        nutrients,
+        ["1008", "2047", "2048", "208"],
+        [
+            "energy",
+            "energy (atwater general factors)",
+            "energy (atwater specific factors)",
+            "energy, kcal",
+            "calories",
+        ]
+    );
 
+    const protein = getNutrientValue(
+        nutrients,
+        ["1003", "203"],
+        [
+            "protein",
+            "protein, total",
+            "protein, total (n x 6.25)",
+        ]
+    );
 
-  // ==========================================================
-  // CALORIES
-  // ==========================================================
+    const carbohydrates = getNutrientValue(
+        nutrients,
+        ["1005", "205"],
+        [
+            "carbohydrate, by difference",
+            "carbohydrate",
+            "carbohydrates",
+            "total carbohydrate",
+        ]
+    );
 
-  const calories = getNutrientValue(
-    nutrients,
-    ["1008", "2047", "2048", "208"],
-    [
-      "energy",
-      "energy (atwater general factors)",
-      "energy (atwater specific factors)",
-      "energy, kcal",
-      "calories",
-    ]
-  );
+    const fat = getNutrientValue(
+        nutrients,
+        ["1004", "204"],
+        [
+            "total lipid (fat)",
+            "total lipid",
+            "fat",
+            "total fat",
+        ]
+    );
 
+    const fiber = getNutrientValue(
+        nutrients,
+        ["1079", "291"],
+        [
+            "fiber, total dietary",
+            "dietary fiber",
+            "fiber",
+            "total dietary fiber",
+        ]
+    );
 
-  // ==========================================================
-  // PROTEIN
-  // ==========================================================
+    const sugar = getNutrientValue(
+        nutrients,
+        ["2000", "1063", "269"],
+        [
+            "total sugars",
+            "total sugar",
+            "sugars, total including nlea",
+            "sugar",
+        ]
+    );
 
-  const protein = getNutrientValue(
-    nutrients,
-    ["1003", "203"],
-    [
-      "protein",
-      "protein, total",
-      "protein, total (n x 6.25)",
-    ]
-  );
+    const sodium = getNutrientValue(
+        nutrients,
+        ["1093", "307"],
+        [
+            "sodium, na",
+            "sodium",
+        ]
+    );
 
-  const carbohydrates = getNutrientValue(
-    nutrients,
-    ["1005", "205"],
-    [
-      "carbohydrate, by difference",
-      "carbohydrate",
-      "carbohydrates",
-      "total carbohydrate",
-    ]
-  );
-
-  const fat = getNutrientValue(
-    nutrients,
-    ["1004", "204"],
-    [
-      "total lipid (fat)",
-      "total lipid",
-      "fat",
-      "total fat",
-    ]
-  );
-
-  const fiber = getNutrientValue(
-    nutrients,
-    ["1079", "291"],
-    [
-      "fiber, total dietary",
-      "dietary fiber",
-      "fiber",
-      "total dietary fiber",
-    ]
-  );
-
-
-  // ==========================================================
-  // SUGAR
-  // ==========================================================
-
-  const sugar = getNutrientValue(
-    nutrients,
-    ["2000", "1063", "269"],
-    [
-      "total sugars",
-      "total sugar",
-      "sugars, total including nlea",
-      "sugar",
-    ]
-  );
-
-  const sodium = getNutrientValue(
-    nutrients,
-    ["1093", "307"],
-    [
-      "sodium, na",
-      "sodium",
-    ]
-  );
-
-
-  return {
-
-    calories: Number(calories) || 0,
-
-    protein: Number(protein) || 0,
-
-    carbohydrates:
-      Number(carbohydrates) || 0,
-
-    fat:
-      Number(fat) || 0,
-
-    fiber:
-      Number(fiber) || 0,
-
-    sugar:
-      Number(sugar) || 0,
-
-    sodium:
-      Number(sodium) || 0,
-
-  };
-
+    return {
+        calories: Number(calories) || 0,
+        protein: Number(protein) || 0,
+        carbohydrates: Number(carbohydrates) || 0,
+        fat: Number(fat) || 0,
+        fiber: Number(fiber) || 0,
+        sugar: Number(sugar) || 0,
+        sodium: Number(sodium) || 0,
+    };
 };
 
-
-// ============================================================
-// CHECK WHETHER NUTRITION EXISTS
-// ============================================================
-
+// A record with only one populated nutrient is not sufficient for
+// the curated recommendation catalog.
 const hasNutrition = (nutrition) => {
+    if (!nutrition) return false;
 
-  if (!nutrition) {
-    return false;
-  }
-
-
-  return (
-
-    Number(nutrition.calories) > 0 ||
-
-    Number(nutrition.protein) > 0 ||
-
-    Number(nutrition.carbohydrates) > 0 ||
-
-    Number(nutrition.fat) > 0 ||
-
-    Number(nutrition.fiber) > 0 ||
-
-    Number(nutrition.sugar) > 0 ||
-
-    Number(nutrition.sodium) > 0
-
-  );
-
+    return (
+        Number(nutrition.calories) > 0 ||
+        Number(nutrition.protein) > 0 ||
+        Number(nutrition.carbohydrates) > 0 ||
+        Number(nutrition.fat) > 0 ||
+        Number(nutrition.fiber) > 0 ||
+        Number(nutrition.sugar) > 0 ||
+        Number(nutrition.sodium) > 0
+    );
 };
 
+// Used by foodSyncService for curated foods.
+const hasCompleteNutrition = (nutrition) => {
+    if (!nutrition) return false;
 
-// ============================================================
-// EXPORTS
-// ============================================================
+    const calories = Number(nutrition.calories);
+    const protein = Number(nutrition.protein);
+    const carbohydrates = Number(nutrition.carbohydrates);
+    const fat = Number(nutrition.fat);
+
+    return (
+        Number.isFinite(calories) &&
+        Number.isFinite(protein) &&
+        Number.isFinite(carbohydrates) &&
+        Number.isFinite(fat) &&
+        calories > 0 &&
+        protein >= 0 &&
+        carbohydrates >= 0 &&
+        fat >= 0
+    );
+};
 
 module.exports = {
-
-  extractNutrition,
-
-  hasNutrition,
-
+    extractNutrition,
+    hasNutrition,
+    hasCompleteNutrition,
+    getNutrientNumber,
+    getNutrientName,
+    getNutrientUnit,
 };
